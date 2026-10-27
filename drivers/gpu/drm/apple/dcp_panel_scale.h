@@ -135,8 +135,16 @@ static inline u32 dcp_cie1931(u32 lightness)
 	return retval;
 }
 
-/* CIE 1931 lightness mapped into linear nits, 0..maximum. */
-static inline u32 dcp_perceptual_nits(u32 level, u32 maximum)
+/*
+ * J313's backlight firmware floors near 4 nits. The unstretched CIE curve
+ * stays under that floor for about the first 7% of a 420-nit range, so
+ * levels 1, 10, 20 and 32 all read back as 32. The same floor applies when
+ * the maximum is the 394-nit cap. Level 0 stays off.
+ */
+#define DCP_PANEL_MIN_NITS	4U
+
+/* CIE 1931 lightness mapped into linear nits, 0..maximum. No floor. */
+static inline u32 dcp_cie_nits(u32 level, u32 maximum)
 {
 	u32 lightness;
 	u64 y;
@@ -149,6 +157,91 @@ static inline u32 dcp_perceptual_nits(u32 level, u32 maximum)
 	lightness = (u32)((u64)level * DCP_LUMINANCE_SCALE / maximum);
 	y = dcp_cie1931(lightness);
 	return (u32)((y * maximum + DCP_LUMINANCE_SCALE / 2) / DCP_LUMINANCE_SCALE);
+}
+
+/* Smallest unstretched level whose nits reach DCP_PANEL_MIN_NITS. */
+static inline u32 dcp_visible_floor_level(u32 maximum)
+{
+	u32 lo, hi, mid;
+
+	if (maximum <= 1)
+		return 1;
+
+	lo = 1;
+	hi = maximum;
+	while (lo < hi) {
+		mid = lo + (hi - lo) / 2;
+		if (dcp_cie_nits(mid, maximum) >= DCP_PANEL_MIN_NITS)
+			hi = mid;
+		else
+			lo = mid + 1;
+	}
+	return lo;
+}
+
+/*
+ * CIE nits, with levels 1..maximum placed on the visible part of the curve.
+ * Level 0 stays off. This still sits on the firmware floor for several steps,
+ * so callers use dcp_perceptual_nits().
+ */
+static inline u32 dcp_curve_nits(u32 level, u32 maximum)
+{
+	u32 floor, span, virtual;
+
+	if (!maximum || !level)
+		return 0;
+	if (level >= maximum)
+		return maximum;
+
+	floor = dcp_visible_floor_level(maximum);
+	if (floor <= 1 || floor >= maximum)
+		return dcp_cie_nits(level, maximum);
+
+	span = maximum - floor;
+	virtual = floor + (u32)(((u64)(level - 1) * span) / (maximum - 1));
+	if (virtual > maximum)
+		virtual = maximum;
+	return dcp_cie_nits(virtual, maximum);
+}
+
+/*
+ * Level 1 is the panel minimum. The unstretched CIE curve stays on that one
+ * nit for about the first 7% of the range, so those levels used to read back
+ * as one value. That span gains one nit per eight levels. Above the old
+ * floor, levels follow the visible CIE curve stretched across the whole
+ * range, so mid-range levels move up with the floor.
+ */
+static inline u32 dcp_perceptual_nits(u32 level, u32 maximum)
+{
+	u32 floor, rise, ramp_end, nits;
+
+	if (!maximum || !level)
+		return 0;
+	if (level >= maximum)
+		return maximum;
+
+	floor = dcp_visible_floor_level(maximum);
+	nits = dcp_curve_nits(level, maximum);
+	if (floor <= 1 || floor >= maximum)
+		return nits;
+
+	rise = floor / 8;
+	if (!rise)
+		rise = 1;
+	ramp_end = DCP_PANEL_MIN_NITS + rise;
+	if (ramp_end > maximum)
+		ramp_end = maximum;
+
+	if (level < floor) {
+		nits = DCP_PANEL_MIN_NITS +
+		       (u32)(((u64)(level - 1) * rise) / (floor - 1));
+		if (nits < DCP_PANEL_MIN_NITS)
+			nits = DCP_PANEL_MIN_NITS;
+		return nits;
+	}
+	if (nits < ramp_end)
+		return ramp_end;
+	return nits;
 }
 
 /*
