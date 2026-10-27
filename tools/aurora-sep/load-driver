@@ -39,7 +39,24 @@ if [ "${AURORA_SEP_SESSION:-0}" != 1 ]; then
     exec keyctl session aurora-sep-load env AURORA_SEP_SESSION=1 "$0" "$@"
 fi
 
-modprobe apple_sep xart_writes=1 provision_keybag=1
+# The options have to be on disk before udev's first load. Do not replace a
+# file the Touch ID package or a --read-only install already wrote: /etc
+# overrides this path, and rewriting it would force writes back on.
+modprobe_conf=/usr/lib/modprobe.d/apple-sep.conf
+if [ ! -f "$modprobe_conf" ]; then
+    mkdir -p /usr/lib/modprobe.d
+    printf '%s\n' 'options apple_sep xart_writes=1 provision_keybag=1' >"$modprobe_conf"
+fi
+if [ -d /sys/module/apple_sep ]; then
+    writes=$(cat /sys/module/apple_sep/parameters/xart_writes 2>/dev/null || true)
+    bag=$(cat /sys/module/apple_sep/parameters/provision_keybag 2>/dev/null || true)
+    if [ "$writes" != 1 ] || [ "$bag" != 1 ]; then
+        log "apple_sep is already loaded with xart_writes=${writes:-missing} provision_keybag=${bag:-missing}. $modprobe_conf applies on the next boot; reboot before expecting those options."
+        exit 1
+    fi
+else
+    modprobe apple_sep
+fi
 
 work=$(mktemp -d /run/aurora-sep-load.XXXXXX)
 cleanup() {
