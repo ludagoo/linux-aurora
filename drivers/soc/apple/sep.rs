@@ -1054,6 +1054,9 @@ impl SepData {
         if dt::registration_already_sent(sep_node) {
             return Err(EBUSY);
         }
+        if self.shutting_down.load(Relaxed) {
+            return Err(ENODEV);
+        }
 
         if let Err(e) = dt::mark_registration_sent(sep_node, iova) {
             dev_err!(
@@ -1078,6 +1081,9 @@ impl SepData {
         // reload's TZ0 would go unanswered. Record the boot first, as the warm
         // path does, so a reload stops at probe and says to reboot instead.
         let iova = self.shmem.lock().as_ref().map_or(0, |buf| buf.dma_handle());
+        if self.shutting_down.load(Relaxed) {
+            return Err(ENODEV);
+        }
         if let Err(e) = dt::mark_registration_sent(sep_node, iova) {
             dev_err!(
                 self.dev,
@@ -2191,7 +2197,12 @@ impl SepData {
         let steps = this.store_wait_steps.load(Relaxed) + 1;
         this.store_wait_steps.store(steps, Relaxed);
         match Self::open_xart_store(&this.dev, this.profile) {
-            Ok(store) => *this.store.lock() = Some(store),
+            Ok(store) => {
+                *this.store.lock() = Some(store);
+                let writable = this.xart_writable();
+                let guard = this.with_store(|store| store.guard_state()).flatten();
+                diag::refresh_store(writable, guard);
+            }
             Err(e) if e == ENODEV && steps < STORE_WAIT_STEPS => {
                 return Self::arm_store_wait(this);
             }
@@ -2203,13 +2214,25 @@ impl SepData {
                 e
             ),
         }
+        if this.shutting_down.load(Relaxed) {
+            return;
+        }
         this.store_pending.store(false, Relaxed);
         let Some(sep_node) = dt::sep_node() else {
             dev_err!(this.dev, "the SEP node is gone; not booting the SEP\n");
             return;
         };
+        if this.shutting_down.load(Relaxed) {
+            return;
+        }
         if let Err(e) = this.attach(&sep_node) {
             dev_err!(this.dev, "could not boot the SEP ({:?})\n", e);
+            diag::attach(false);
+        } else {
+            // Cold boot sets `registered` only after the IMG4 ack, so this
+            // cannot wait for that flag. The synchronous probe path arms
+            // settle only once that flag is already set.
+            Self::arm_settle(this);
         }
     }
 
@@ -2469,6 +2492,17 @@ impl SepData {
             handle.unregister();
         }
 
+        // Finish the store wait before dropping the mailbox. A tick blocked in
+        // open_xart_store rechecks shutting_down before it attaches, and this
+        // waits for that return. Waiting until after the mailbox is gone lets
+        // the tick publish the boot marker, so the next probe stops with
+        // EBUSY.
+        unsafe {
+            sep_cancel_delayed_work_sync(
+                DelayedWork::raw_as_work(core::ptr::addr_of!(self.store_wait_work)).cast(),
+            );
+        }
+
         *self.mbox.lock() = None;
 
         // SAFETY: all six pointers refer to pinned work fields in `self`.
@@ -2709,7 +2743,9 @@ struct SepDriver(Arc<SepData>);
 // probe then waits for it before booting (see `store_wait_tick`). Writes to
 // the shared store and identity provisioning stay opt-in through the
 // xart_writes and provision_keybag module parameters, so a load the owner did
-// not ask for changes nothing on the Mac.
+// not ask for does not write the shared xART store. It does create
+// /var/lib/aurora-sep-host-state.bin (2359296 bytes) the first time that
+// Linux-only store is opened.
 kernel::of_device_table!(
     OF_TABLE,
     MODULE_OF_TABLE,

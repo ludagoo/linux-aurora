@@ -165,9 +165,14 @@ config APPLE_SEP
 	  when the driver validates the physical extent ownership invariants.
 	  Unsupported APFS layouts fail closed. With writes off the driver
 	  still attaches, but refuses Touch ID enrol and verify: the enclave
-	  saves anti-replay state after every match.
+	  saves anti-replay state after every match. A default load still
+	  creates /var/lib/aurora-sep-host-state.bin (2359296 bytes) the
+	  first time it opens that Linux-only store. That is not an xART write.
 
-	  Say Y here if you have an Apple silicon Mac.
+	  Say M here if you have an Apple silicon Mac. Built in, the
+	  modprobe.d options never reach the driver, so Touch ID setup can
+	  only pass xart_writes and provision_keybag on the kernel command
+	  line. M is the default on Apple silicon.
 
 config APPLE_SEP_KUNIT_TEST
 	bool "KUnit tests for the Apple SEP driver" if !KUNIT_ALL_TESTS
