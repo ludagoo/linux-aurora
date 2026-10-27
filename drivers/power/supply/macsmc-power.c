@@ -970,6 +970,34 @@ static int macsmc_power_event(struct notifier_block *nb, unsigned long event, vo
 	return NOTIFY_DONE;
 }
 
+/*
+ * Apple does not document the CHNC bit meanings. The raw value is exposed
+ * for userspace and debugging.
+ */
+static ssize_t charge_inhibit_reason_show(struct device *dev,
+					   struct device_attribute *attr,
+					   char *buf)
+{
+	struct power_supply *psy = dev_to_psy(dev);
+	struct macsmc_power *power = power_supply_get_drvdata(psy);
+	u64 flags;
+	int ret;
+
+	ret = apple_smc_read_u64(power->smc, SMC_KEY(CHNC), &flags);
+	if (ret)
+		return ret < 0 ? ret : -EIO;
+
+	return sysfs_emit(buf, "0x%016llx\n", (unsigned long long)flags);
+}
+
+static DEVICE_ATTR_RO(charge_inhibit_reason);
+
+static struct attribute *macsmc_battery_attrs[] = {
+	&dev_attr_charge_inhibit_reason.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(macsmc_battery);
+
 static int macsmc_power_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -1155,7 +1183,9 @@ static int macsmc_power_probe(struct platform_device *pdev)
 		macsmc_battery_read_bcf0(power, &val32);
 
 		psy_cfg.drv_data = power;
+		psy_cfg.attr_grp = macsmc_battery_groups;
 		power->batt = devm_power_supply_register(dev, &power->batt_desc, &psy_cfg);
+		psy_cfg.attr_grp = NULL;
 		if (IS_ERR(power->batt)) {
 			dev_err_probe(dev, PTR_ERR(power->batt),
 				      "Failed to register battery\n");
