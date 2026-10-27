@@ -49,14 +49,18 @@ for example with `systemctl edit aurora-sep.service`:
 Environment=AURORA_SEP_READY_TIMEOUT=180
 ```
 
-The driver exports its module alias, so udev loads it on every Mac whose device
-tree enables the SEP and the enclave is booted early: on the M1 and M2 laptops
-the Secure Enclave sits in the path of the microphone data lines, and the
-microphones only work once it runs. If udev loads the driver before the iBoot
-system container's partition link exists, the boot waits up to 30 s for it and
-then runs without the xART store (Touch ID and trusted keys stay unavailable
-until the next boot). The service above remains harmless and is no longer
-required to load the driver.
+The driver exports its module alias, so udev loads it where the device tree
+already enables the SEP node. That is the M1 family and J700. On the M1
+laptops the Secure Enclave sits in the path of the microphone data lines, and
+the microphones only work once it runs. There the service above remains
+harmless and is no longer required to load the driver. The M2, M2 Pro/Max,
+and M3 Air nodes stay disabled in the device tree and are enabled by module
+init, so those machines still need the loader. If udev loads the driver before the iBoot system
+container's partition link exists, the boot waits up to 30 s for it and then
+runs without the xART store (Touch ID and trusted keys stay unavailable until
+the next boot). A default load, including one with `xart_writes=0`, still
+creates `/var/lib/aurora-sep-host-state.bin` (2359296 bytes) the first time
+it opens that Linux-only store. That file is not an xART write.
 
 The driver defaults to `xart_writes=0 provision_keybag=0`: read-only operation,
 which boots the enclave but refuses Touch ID enrol and verify. The Touch ID
