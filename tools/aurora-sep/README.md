@@ -66,8 +66,11 @@ The driver defaults to `xart_writes=0 provision_keybag=0`: read-only operation,
 which boots the enclave but refuses Touch ID enrol and verify. The Touch ID
 package installs `/usr/lib/modprobe.d/apple-sep.conf` with
 `options apple_sep xart_writes=1 provision_keybag=1`; a `--read-only` install
-overrides it with `options apple_sep xart_writes=0 provision_keybag=0` in
-`/etc/modprobe.d/`. Writes are accepted only when the APFS `.gl`
+hides that file by writing the same name,
+`/etc/modprobe.d/apple-sep.conf`, with
+`options apple_sep xart_writes=0 provision_keybag=0`. Another name in
+`/etc/modprobe.d` does not override it: modprobe passes both lines, and the
+set-once parameters abort the load. Writes are accepted only when the APFS `.gl`
 extent passes the driver's narrow ownership checks: one physical extent, no snapshots or revert
 state, and a single extent reference owned by the `.gl` inode. The kernel
 resolves that extent from checksum-validated APFS metadata; unsupported layouts
