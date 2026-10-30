@@ -15,7 +15,7 @@ DRIVER = Path('drivers/media/platform/apple/avd')
 
 
 def function(source, name):
-    match = re.search(r'^(?:static )?(?:int|void)\s+' + name + r'\(', source, re.M)
+    match = re.search(r'^(?:static )?(?:int|void|u64)\s+' + name + r'\(', source, re.M)
     if not match:
         raise ValueError(name)
     start = match.start()
@@ -46,6 +46,9 @@ PREFIX = r'''
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
+typedef uint64_t u64;
+typedef int8_t s8;
+#define U64_MAX UINT64_MAX
 typedef uint64_t dma_addr_t;
 #define ALIGN(x,a) (((x)+(a)-1)&~((__typeof__(x))(a)-1))
 #define ALIGN_DOWN(x,a) ((x)&~((__typeof__(x))(a)-1))
@@ -155,7 +158,8 @@ def main():
     text = {name: p.read_text() for name, p in paths.items()}
     src = text['avd-av1.c']
     macros = src[src.index('#define AVD_CDFS_SIZE'):src.index('struct avd_av1_run {')]
-    functions = {n: function(src, n) for n in ['avd_av1_set_prob', 'avd_color_size', 'avd_av1_run_preamble', 'avd_av1_adjust_decoded_fmt']}
+    helpers = [n for n in ['avd_av1_ref_ts'] if re.search(r'^static u64 ' + n + r'\(', src, re.M)]
+    functions = {n: function(src, n) for n in helpers + ['avd_av1_set_prob', 'avd_color_size', 'avd_av1_run_preamble', 'avd_av1_adjust_decoded_fmt']}
     if args.mutation == 'round-up':
         if 'ALIGN_DOWN((dst), AVD_ALIGN)' not in macros:
             parser.error('round-up mutation requires aligned tail macros')
@@ -178,6 +182,9 @@ def main():
     build = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=environment)
     (args.out / 'build.log').write_text(build.stdout)
     if build.returncode:
+        if args.mutation:
+            print(f'mutation {args.mutation}: controls did not build (see build.log); no mutant verdict')
+            raise SystemExit(0)
         raise SystemExit(build.returncode)
     run_command = [str(exe)]
     if args.case != 'all':
