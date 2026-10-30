@@ -2220,6 +2220,11 @@ impl SepData {
         this.store_pending.store(false, Relaxed);
         let Some(sep_node) = dt::sep_node() else {
             dev_err!(this.dev, "the SEP node is gone; not booting the SEP\n");
+            // Same end as a failed settle: diag must not stay `unknown`, or
+            // every trusted-key caller waits out the full bring-up timeout.
+            diag::attach(false);
+            diag::bringup_ended();
+            this.finish_bringup();
             return;
         };
         if this.shutting_down.load(Relaxed) {
@@ -2228,6 +2233,8 @@ impl SepData {
         if let Err(e) = this.attach(&sep_node) {
             dev_err!(this.dev, "could not boot the SEP ({:?})\n", e);
             diag::attach(false);
+            diag::bringup_ended();
+            this.finish_bringup();
         } else {
             // Cold boot sets `registered` only after the IMG4 ack, so this
             // cannot wait for that flag. The synchronous probe path arms
