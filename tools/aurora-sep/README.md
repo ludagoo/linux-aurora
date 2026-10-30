@@ -63,7 +63,11 @@ creates `/var/lib/aurora-sep-host-state.bin` (2359296 bytes) the first time
 it opens that Linux-only store. That file is not an xART write.
 
 The driver defaults to `xart_writes=0 provision_keybag=0`: read-only operation,
-which boots the enclave but refuses Touch ID enrol and verify. The Touch ID
+which boots the enclave but refuses Touch ID enrol and verify. A kernel
+release that carries this driver needs `aurora-touchid` 3 (the package that
+owns `/usr/lib/modprobe.d/apple-sep.conf`) installed before the first load.
+A bare `modprobe` from an older `apple-sep.service` otherwise stays
+read-only. The Touch ID
 package installs `/usr/lib/modprobe.d/apple-sep.conf` with
 `options apple_sep xart_writes=1 provision_keybag=1`; a `--read-only` install
 hides that file by writing the same name,
