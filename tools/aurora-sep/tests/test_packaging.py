@@ -44,6 +44,9 @@ class PkgbuildTest(unittest.TestCase):
     def test_aurora_sep_sums_match_tree(self):
         self.check(ARCH / "aurora-sep")
 
+    def test_aurora_touchid_sums_match_tree(self):
+        self.check(SEP / "aurora-touchid")
+
 
 class FedoraSpecTest(unittest.TestCase):
     def test_sources_are_in_tree(self):
