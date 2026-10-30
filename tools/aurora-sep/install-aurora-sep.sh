@@ -297,8 +297,11 @@ PIN_BEGIN="# >>> aurora-sep pin (remove with: install-aurora-sep.sh --uninstall)
 PIN_END="# <<< aurora-sep pin"
 STATE=/var/lib/aurora-sep
 FALLBACK_ID=aurora-sep-previous-kernel
-# Written only by --read-only; keeps the driver from writing to the enclave.
-MODPROBE_CONF=/etc/modprobe.d/aurora-sep.conf
+# Written only by --read-only. The name matches the file the Touch ID
+# package owns under /usr/lib/modprobe.d, so this file hides it. A second
+# name would pass both option lines, and the driver's set-once parameters
+# then refuse to load.
+MODPROBE_CONF=/etc/modprobe.d/apple-sep.conf
 READ_ONLY=0
 DESKTOP_FIXES=0
 DESKTOP_FIXES_DATA=""
