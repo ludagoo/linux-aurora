@@ -27,7 +27,7 @@ def write_exe(path, body):
 
 
 class LoadDriverTest(unittest.TestCase):
-    def run_loader(self, module_present):
+    def run_loader(self, module_present, diag=None):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             bindir = root / "bin"
@@ -50,10 +50,17 @@ class LoadDriverTest(unittest.TestCase):
                 printf '%s\\n' "$*" >> "$MODPROBE_LOG"
                 exit 0
                 """)
+            if diag is None:
+                diag_env = "none"
+            else:
+                diag_path = root / "xart"
+                diag_path.write_text(diag)
+                diag_env = str(diag_path)
             env = os.environ.copy()
             env.update({
                 "PATH": "%s:%s" % (bindir, env.get("PATH", "")),
                 "AURORA_SEP_MODULE_DIR": str(module),
+                "AURORA_SEP_DIAG_XART": diag_env,
                 "AURORA_SEP_READY_TIMEOUT": "0",
                 "AURORA_SEP_DEVICE_TIMEOUT": "0",
                 "AURORA_SEP_RUN_DIR": str(root),
@@ -79,6 +86,25 @@ class LoadDriverTest(unittest.TestCase):
         self.assertNotIn("reboot before expecting", proc.stderr)
         self.assertIn("did not seal", proc.stderr)
 
+    def test_already_loaded_read_only_hints_and_continues(self):
+        proc, modprobe_log = self.run_loader(module_present=True, diag="disabled\n")
+        self.assertIn("diag xart=disabled", proc.stderr)
+        self.assertIn("reboot before expecting", proc.stderr)
+        self.assertIn("did not seal", proc.stderr)
+        self.assertEqual(modprobe_log, "")
+        self.assertNotEqual(proc.returncode, 0)
+
+    def test_already_loaded_with_writes_does_not_hint(self):
+        proc, modprobe_log = self.run_loader(module_present=True, diag="enabled\n")
+        self.assertNotIn("reboot before expecting", proc.stderr)
+        self.assertIn("did not seal", proc.stderr)
+        self.assertEqual(modprobe_log, "")
+
+    def test_modprobe_path_does_not_hint_when_diag_is_disabled(self):
+        proc, modprobe_log = self.run_loader(module_present=False, diag="disabled\n")
+        self.assertNotIn("reboot before expecting", proc.stderr)
+        self.assertIn("apple_sep", modprobe_log)
+
     def test_does_not_write_the_packaged_modprobe_file(self):
         text = LOAD.read_text()
         self.assertNotIn("/usr/lib/modprobe.d/apple-sep.conf'", text)
@@ -88,6 +114,7 @@ class LoadDriverTest(unittest.TestCase):
     def test_read_only_install_uses_the_packaged_name(self):
         text = INSTALL.read_text()
         self.assertIn("MODPROBE_CONF=/etc/modprobe.d/apple-sep.conf", text)
+        self.assertIn("MODPROBE_CONF_OLD=/etc/modprobe.d/aurora-sep.conf", text)
         self.assertNotIn("MODPROBE_CONF=/etc/modprobe.d/aurora-sep.conf", text)
 
 

@@ -63,18 +63,17 @@ creates `/var/lib/aurora-sep-host-state.bin` (2359296 bytes) the first time
 it opens that Linux-only store. That file is not an xART write.
 
 The driver defaults to `xart_writes=0 provision_keybag=0`: read-only operation,
-which boots the enclave but refuses Touch ID enrol and verify. A kernel
-release that carries this driver needs `aurora-touchid` 3 (the package that
-owns `/usr/lib/modprobe.d/apple-sep.conf`) installed before the first load.
-A bare `modprobe` from an older `apple-sep.service` otherwise stays
-read-only. The Touch ID
-package installs `/usr/lib/modprobe.d/apple-sep.conf` with
-`options apple_sep xart_writes=1 provision_keybag=1`; a `--read-only` install
-hides that file by writing the same name,
-`/etc/modprobe.d/apple-sep.conf`, with
-`options apple_sep xart_writes=0 provision_keybag=0`. Another name in
-`/etc/modprobe.d` does not override it: modprobe passes both lines, and the
-set-once parameters abort the load. Writes are accepted only when the APFS `.gl`
+which boots the enclave but refuses Touch ID enrol and verify. `aurora-sep`
+and `aurora-touchid` each install `/usr/lib/modprobe.d/apple-sep.conf` with
+`options apple_sep xart_writes=1 provision_keybag=1`, and each conflicts with
+the other: that path can have only one owner. A bare `modprobe` before that
+file is installed stays read-only. A `--read-only` install hides the packaged
+file by writing the same name, `/etc/modprobe.d/apple-sep.conf`, with
+`options apple_sep xart_writes=0 provision_keybag=0`. An older install wrote
+`/etc/modprobe.d/aurora-sep.conf`; the installer and `aurora-touchid` rename
+that file onto `apple-sep.conf`. Another name in `/etc/modprobe.d` does not
+override the packaged file: modprobe passes both lines, and the set-once
+parameters abort the load. Writes are accepted only when the APFS `.gl`
 extent passes the driver's narrow ownership checks: one physical extent, no snapshots or revert
 state, and a single extent reference owned by the `.gl` inode. The kernel
 resolves that extent from checksum-validated APFS metadata; unsupported layouts
@@ -187,10 +186,12 @@ by the Quickshell lock screen.
 
 ## Packages
 
-`packaging/` builds `aurora-sep`, with the loader, its service and the fprintd
-policy, as a distribution package. libfprint with the aurora driver comes from
+`packaging/` builds `aurora-sep`, with the loader, its service, the modprobe
+option file and the fprintd policy, as a distribution package. libfprint with
+the aurora driver comes from
 https://github.com/aurora-silicon/aurora-sep-userspace; install both. Installing
-`aurora-sep` lets fprintd load the driver with xART writes on, as above.
+`aurora-sep` lets fprintd load the driver with xART writes on, as above. It
+conflicts with `aurora-touchid`, which ships the same modprobe file.
 
 On Fedora, `packaging/fedora/build.sh` builds `aurora-sep`. It installs build
 dependencies, so run it in a throwaway container from the top of this tree:

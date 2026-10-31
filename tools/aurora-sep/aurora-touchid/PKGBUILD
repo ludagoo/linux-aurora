@@ -7,6 +7,10 @@ arch=('any')
 url="https://github.com/iconidentify/aurora-linux"
 license=('GPL-2.0-only')
 depends=('fprintd' 'libfprint>=1.94.100-1.1' 'python' 'kmod')
+# Same path as aurora-sep's apple-sep.conf. One owner, or the set-once
+# parameters see two option lines and refuse to load.
+conflicts=('aurora-sep')
+install=aurora-touchid.install
 source=('aurora-touchid-setup'
         'extract-mesa-calibration'
         'apple-sep.service'
