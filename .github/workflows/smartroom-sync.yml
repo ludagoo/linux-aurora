@@ -1,0 +1,120 @@
+# SmartRoom: keep this fork's integration/aurora an exact, fast-forward-only
+# mirror of omacom's, keep the inherited upstream workflows disabled, and open
+# an issue when smartroom/main no longer contains the commit omarchy-pkgs
+# ships. It never builds the kernel and never rewrites smartroom/main.
+# Lives only on smartroom/main and is never sent upstream (see CARRY.md).
+#
+# GitHub runs `schedule` only from the default branch. While the default
+# branch is integration/aurora the daily run is dormant; run it by hand with
+#   gh workflow run smartroom-sync.yml -R ludagoo/linux-aurora --ref smartroom/main
+# or make smartroom/main the default branch.
+
+name: SmartRoom sync
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  push:
+    branches: [smartroom/main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: smartroom-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: sync
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write # disable inherited upstream workflows
+      contents: write # fast-forward integration/aurora
+      issues: write # open, update or close the attention issues
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      # Optional fine-grained token (contents + workflows write on this repo
+      # only). The Actions token cannot move a branch onto commits that change
+      # .github/workflows, which upstream does about twice a week.
+      SYNC_TOKEN: ${{ secrets.SMARTROOM_SYNC_TOKEN || github.token }}
+      UPSTREAM: omacom/linux-aurora
+      MIRROR: integration/aurora
+      CARRY: smartroom/main
+      RECIPE: omacom/omarchy-pkgs
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - name: Mirror, disable inherited workflows, check the carry base
+        run: |
+          set -euo pipefail
+          note() { echo "$*"; echo "- $*" >> "$GITHUB_STEP_SUMMARY"; }
+
+          # attention TITLE BODY: open or update the one open issue with this
+          # title; an empty BODY closes it.
+          attention() {
+            local title=$1 body=$2 number
+            number=$(gh issue list --state open --limit 200 --json number,title |
+              jq -r --arg t "$title" 'map(select(.title == $t))[0].number // empty')
+            if [[ -n $body ]]; then
+              body+=$'\n\n'"_Updated by $RUN_URL ($(date -u '+%F %H:%M UTC'))._"
+              if [[ -n $number ]]; then
+                gh issue edit "$number" --body "$body" > /dev/null
+                note "updated issue #$number: $title"
+              else
+                note "opened issue $(gh issue create --title "$title" --body "$body")"
+              fi
+            elif [[ -n $number ]]; then
+              gh issue close "$number" --comment "Resolved, checked by $RUN_URL."
+              note "closed issue #$number: $title"
+            fi
+          }
+
+          # 1. Fast-forward the mirror. Never a merge, never a force.
+          up=$(gh api "repos/$UPSTREAM/branches/$MIRROR" --jq .commit.sha)
+          cur=$(gh api "repos/$GH_REPO/branches/$MIRROR" --jq .commit.sha)
+          problem=""
+          if [[ $up == "$cur" ]]; then
+            note "mirror: $MIRROR already at upstream $up"
+          else
+            status=$(gh api "repos/$UPSTREAM/compare/$cur...$up" --jq .status)
+            if [[ $status != ahead ]]; then
+              problem="Upstream \`$MIRROR\` (\`$up\`) is not a fast-forward of the mirror (\`$cur\`), compare status \`$status\`. Upstream rewrote the branch or someone committed to the mirror. Nothing was changed; a human decides."
+            # The mirror has nothing upstream lacks, so the sync-fork API
+            # fast-forwards; merge_type proves it.
+            elif res=$(GH_TOKEN=$SYNC_TOKEN gh api -X POST "repos/$GH_REPO/merge-upstream" \
+                         -f branch="$MIRROR" 2>&1) &&
+                 [[ $(jq -r .merge_type <<< "$res") == fast-forward ]]; then
+              note "mirror: fast-forwarded $MIRROR $cur -> $up"
+            else
+              problem="Fast-forwarding \`$MIRROR\` \`$cur\` -> \`$up\` failed:"$'\n\n```\n'"${res:0:600}"$'\n```\n\n'"Usually upstream changed \`.github/workflows\`, which the Actions token may not push. Sync as Lucas: \`gh api -X POST repos/$GH_REPO/merge-upstream -f branch=$MIRROR\` (or the Sync fork button), then rerun this workflow; or add a \`SMARTROOM_SYNC_TOKEN\` secret."
+            fi
+          fi
+          [[ -z $problem ]] || note "mirror: FAILED"
+          attention "integration/aurora mirror sync failed" "$problem"
+
+          # 2. Upstream's CI must never run here (45-min builds, Namespace
+          #    runners); new upstream workflow files get registered on sync.
+          gh api "repos/$GH_REPO/actions/workflows" --paginate --jq '.workflows[]
+              | select(.state == "active" and (.path | startswith(".github/workflows/"))
+                       and (.path | startswith(".github/workflows/smartroom-") | not))
+              | "\(.id) \(.path)"' |
+            while read -r id path; do
+              gh api -X PUT "repos/$GH_REPO/actions/workflows/$id/disable"
+              note "disabled inherited workflow $path"
+            done
+
+          # 3. smartroom/main must contain the commit omarchy-pkgs ships.
+          pin=$(gh api "repos/$RECIPE/contents/pkgbuilds/linux-aurora/PKGBUILD" --jq .content |
+            base64 -d | sed -n 's/^_commit=\([0-9a-f]\{40\}\)$/\1/p')
+          [[ $pin =~ ^[0-9a-f]{40}$ ]] || { echo "::error::no single _commit pin in $RECIPE linux-aurora"; exit 1; }
+          missing=$(gh api "repos/$GH_REPO/compare/$pin...$CARRY" --jq .behind_by)
+          problem=""
+          if (( missing > 0 )); then
+            problem="$RECIPE now pins linux-aurora at \`$pin\`, which \`$CARRY\` does not contain ($missing upstream commits missing; mirror tip \`$up\`). Rebase the carry onto the new pin as CARRY.md describes (tag the old tip first, rebase, never merge), then rebuild in ludagoo/smartroom-pkgs."
+            note "carry: $CARRY lacks pin $pin ($missing commits): rebase needed"
+          else
+            note "carry: $CARRY contains pin $pin"
+          fi
+          attention "smartroom/main needs a rebase" "$problem"
