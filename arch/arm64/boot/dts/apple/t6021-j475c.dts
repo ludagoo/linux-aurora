@@ -125,3 +125,143 @@
 };
 
 #include "hwmon-fan-dual.dtsi"
+
+/*
+ * Three independent outputs: two more external display pipes, dcpext2 and
+ * dcpext3, from the M2 Max laptops (t6021-display2.dtsi). Their addresses,
+ * interrupts and DARTs match this Studio's ADT. On the Studio they can
+ * drive any of the four rear USB-C ports (ATC0-3) through the per-ATC
+ * display crossbar; HDMI stays on dcpext0 (lpdptx-phy0).
+ * HDMI + up to three rear USB-C screens, or three USB-C screens.
+ */
+#include "t6021-display2.dtsi"
+
+/* display2 lists disp0_dart; dcp (and its DART) stays off here. */
+&display {
+	iommus = <&dispext0_dart 0 0x100 0x0 0x10 0x0>,
+		 <&dispext1_dart 0 0x100 0x0 0x10 0x0>,
+		 <&dispext2_dart 0>, <&dispext3_dart 0>;
+};
+
+/*
+ * Disabled until m1n1 (dt_reserve_dcpext_firmware) reserves the firmware
+ * and sets apple,firmware-compat and status "okay" for each dcpextN alias
+ * whose IOP exists. A dcpext that is "okay" but cannot probe would keep
+ * the Type-C muxes from registering and take every rear USB-C port (and
+ * the DRM device) down with it.
+ */
+&dcpext2 {
+	status = "disabled";
+	phys = <&atcphy0 PHY_TYPE_DP>, <&atcphy1 PHY_TYPE_DP>,
+	       <&atcphy2 PHY_TYPE_DP>, <&atcphy3 PHY_TYPE_DP>;
+	phy-names = "typec0", "typec1", "typec2", "typec3";
+	mux-controls = <&atcphy0_xbar 0>, <&atcphy1_xbar 0>,
+		       <&atcphy2_xbar 0>, <&atcphy3_xbar 0>;
+	mux-control-names = "typec0", "typec1", "typec2", "typec3";
+	apple,typec-mux-indices = <4 4 4 4>;
+	apple,typec-dptx-phys = <0 1 2 3>;
+
+	typec-routes {
+		route@3 {
+			reg = <3>;
+			mode-switch;
+			port {
+				dcpext2_typec3: endpoint {
+					remote-endpoint = <&typec3_dcpext2>;
+				};
+			};
+		};
+	};
+};
+
+&dcpext3 {
+	status = "disabled";
+	phys = <&atcphy0 PHY_TYPE_DP>, <&atcphy1 PHY_TYPE_DP>,
+	       <&atcphy2 PHY_TYPE_DP>, <&atcphy3 PHY_TYPE_DP>;
+	phy-names = "typec0", "typec1", "typec2", "typec3";
+	mux-controls = <&atcphy0_xbar 0>, <&atcphy1_xbar 0>,
+		       <&atcphy2_xbar 0>, <&atcphy3_xbar 0>;
+	mux-control-names = "typec0", "typec1", "typec2", "typec3";
+	apple,typec-mux-indices = <6 6 6 6>;
+	apple,typec-dptx-phys = <0 1 2 3>;
+
+	typec-routes {
+		route@3 {
+			reg = <3>;
+			mode-switch;
+			port {
+				dcpext3_typec3: endpoint {
+					remote-endpoint = <&typec3_dcpext3>;
+				};
+			};
+		};
+	};
+};
+
+/*
+ * port@3 of each rear port now has three endpoints (dcpext1, 2, 3): make it
+ * addressable and give the dcpext1 endpoint unit 0, as the laptops do.
+ */
+&typec0 {
+	ports {
+		port@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			/delete-node/ endpoint;
+			typec0_dcp: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&dcpext1_typec0>;
+			};
+		};
+	};
+};
+
+&typec1 {
+	ports {
+		port@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			/delete-node/ endpoint;
+			typec1_dcp: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&dcpext1_typec1>;
+			};
+		};
+	};
+};
+
+&typec2 {
+	ports {
+		port@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			/delete-node/ endpoint;
+			typec2_dcp: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&dcpext1_typec2>;
+			};
+		};
+	};
+};
+
+&typec3 {
+	ports {
+		port@3 {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			/delete-node/ endpoint;
+			typec3_dcp: endpoint@0 {
+				reg = <0>;
+				remote-endpoint = <&dcpext1_typec3>;
+			};
+			typec3_dcpext2: endpoint@2 {
+				reg = <2>;
+				remote-endpoint = <&dcpext2_typec3>;
+			};
+			typec3_dcpext3: endpoint@3 {
+				reg = <3>;
+				remote-endpoint = <&dcpext3_typec3>;
+			};
+		};
+	};
+};
